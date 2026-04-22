@@ -1,0 +1,19 @@
+{
+  "rf_threshold": 0.74,
+  "rf_feature_columns": [
+    "Potency",
+    "PH Level",
+    "Impurities",
+    "Dissolution Rate - 15 Mins",
+    "Dissolution Rate - 30 Mins",
+    "Dissolution Rate - 40 Mins",
+    "Process Temp",
+    "Duration"
+  ],
+  "decision_params": {
+    "latest_keep_threshold": 0.8,
+    "rf_accept_override_threshold": 0.35,
+    "meta_threshold": 0.6,
+    "use_meta_stacking": 1.0
+  }
+}
