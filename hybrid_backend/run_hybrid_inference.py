@@ -17,10 +17,10 @@ from hybrid_core import (
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LATEST_DIR = os.path.join(BASE_DIR, '..', 'sid')
+LATEST_DIR = os.path.join(BASE_DIR, '..', 'BACKEND', 'models', 'latest')
 ARTIFACTS_DIR = os.path.join(BASE_DIR, 'artifacts')
 
-TEST_CSV = os.path.join(LATEST_DIR, 'test.csv')
+TEST_CSV = os.path.join(BASE_DIR, 'test .csv')
 OUT_CSV = os.path.join(BASE_DIR, 'hybrid_test_predictions.csv')
 OUT_PNG = os.path.join(ARTIFACTS_DIR, 'hybrid_test_summary.png')
 

@@ -22,7 +22,7 @@ PROJECT_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
 LATEST_DIR = os.path.join(PROJECT_DIR, 'models', 'latest')
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, 'artifacts')
 DATA_DIR = os.path.join(PROJECT_DIR, 'data')
-DEFAULT_INPUT_CSV = os.path.join(DATA_DIR, 'test.csv')
+DEFAULT_INPUT_CSV = os.path.join(DATA_DIR, 'test .csv')
 
 
 def build_measure_text(capa_res: dict) -> str:

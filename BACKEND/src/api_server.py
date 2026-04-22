@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import joblib
+import numpy as np
 import pandas as pd
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
@@ -17,7 +18,7 @@ from docx import Document as DocxDocument
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from quality_store import build_trend_summary, get_batch_trend, init_store, store_prediction
+from quality_store import build_trend_summary, get_batch_trend, init_store, store_prediction, _connect, _to_float
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,8 +27,10 @@ ARTIFACTS_DIR = os.path.join(PROJECT_DIR, 'artifacts')
 SID_DIR = os.path.join(PROJECT_DIR, 'models', 'latest')
 
 from hybrid_core import (  # type: ignore
+    CHARACTERISTICS,
     build_batch_table,
     build_meta_features,
+    duration_minutes,
     hybrid_decision,
     load_hybrid_config,
     load_latest_artifacts,
@@ -458,10 +461,47 @@ def trend():
     characteristic = (request.args.get('characteristic') or '').strip() or None
     limit = request.args.get('limit', default=8, type=int)
 
-    if not product:
-        return jsonify({'error': 'Missing product parameter.'}), 400
     if not DB_READY:
         return jsonify({'error': 'Trend store is not available.'}), 503
+
+    if not product:
+        # Return summary for all products
+        with _connect() as conn:
+            df = pd.read_sql_query(
+                '''
+                SELECT
+                    product,
+                    COUNT(*) AS total_rows,
+                    SUM(CASE WHEN status = 'R' THEN 1 ELSE 0 END) AS reject_rows,
+                    AVG(quantitative) AS avg_quantitative,
+                    AVG(deviation) AS avg_deviation
+                FROM quality_history
+                WHERE product IS NOT NULL AND product != ''
+                GROUP BY product
+                ORDER BY total_rows DESC
+                ''',
+                conn,
+            )
+        
+        products_summary = []
+        for _, row in df.iterrows():
+            total = int(row['total_rows'] or 0)
+            reject = int(row['reject_rows'] or 0)
+            products_summary.append({
+                'product': row['product'],
+                'total_rows': total,
+                'reject_rows': reject,
+                'reject_rate': (reject / total) if total else 0.0,
+                'avg_quantitative': _to_float(row['avg_quantitative']),
+                'avg_deviation': _to_float(row['avg_deviation']),
+            })
+        
+        return jsonify({
+            'all_products': True,
+            'products': products_summary,
+            'total_products': len(products_summary),
+            'trend_text': f'Found {len(products_summary)} products in the database.',
+        })
 
     return jsonify(build_trend_summary(product, characteristic=characteristic, limit=limit))
 
@@ -470,85 +510,73 @@ def trend():
 def predict():
     payload = request.get_json(silent=True) or {}
     product = (payload.get('product') or '').strip()
-    characteristic = (payload.get('characteristic') or '').strip()
+    characteristics = payload.get('characteristics', {})
     start_time_str = (payload.get('startTime') or '').strip()
     end_time_str = (payload.get('endTime') or '').strip()
-    quantitative_str = payload.get('quantitative')
-    min_value_input = payload.get('minValue')
-    max_value_input = payload.get('maxValue')
+    batch = (payload.get('batch') or '').strip()
 
-    if not all([product, characteristic, start_time_str, end_time_str, quantitative_str]):
+    if not all([product, characteristics, start_time_str, end_time_str]):
         return jsonify({'error': 'Missing input fields.'}), 400
 
-    bounds = LATEST_ARTIFACTS['reference_lookup'].get((product, characteristic))
-    if bounds:
-        ref_min, ref_max = bounds
+    if not isinstance(characteristics, dict):
+        return jsonify({'error': 'characteristics must be a dict.'}), 400
+
+    # Create row
+    row = {
+        'ProductName': product,
+        'StartTime': start_time_str,
+        'EndTime': end_time_str,
+        'Batch': batch,
+    }
+    for char in CHARACTERISTICS:
+        val = characteristics.get(char)
+        if val is not None:
+            try:
+                row[char] = float(val)
+            except Exception:
+                return jsonify({'error': f'Invalid value for {char}.'}), 400
+        else:
+            row[char] = np.nan
+
+    # Predict
+    latest_result = predict_latest_for_row(pd.Series(row), LATEST_ARTIFACTS)
+    status_label = latest_result['status']
+    decision_reason = latest_result.get('decision_reason', 'model')
+
+    duration_min = duration_minutes(start_time_str, end_time_str)
+
+    # For derived, use the first characteristic with value
+    first_char = None
+    quantitative = None
+    min_val = None
+    max_val = None
+    for char in CHARACTERISTICS:
+        if not pd.isna(row[char]):
+            first_char = char
+            quantitative = row[char]
+            bounds = LATEST_ARTIFACTS['reference_lookup'].get((product, char))
+            if bounds:
+                min_val, max_val = bounds
+            break
+
+    if first_char:
+        target = (min_val + max_val) / 2.0 if min_val is not None and max_val is not None else quantitative
+        deviation = quantitative - target
+        is_out_of_bounds = quantitative < min_val or quantitative > max_val if min_val is not None and max_val is not None else False
     else:
-        ref_min, ref_max = None, None
+        deviation = 0
+        is_out_of_bounds = False
 
-    try:
-        quantitative = float(quantitative_str)
-    except Exception:
-        return jsonify({'error': 'Invalid quantitative value.'}), 400
+    # Trend summary for the first characteristic
+    trend_summary = build_trend_summary(product, first_char, limit=8) if DB_READY and first_char else {}
 
-    if min_value_input is not None and str(min_value_input).strip() != '':
-        try:
-            min_val = float(min_value_input)
-        except Exception:
-            return jsonify({'error': 'Invalid minValue.'}), 400
-    else:
-        min_val = float(ref_min) if ref_min is not None else None
-
-    if max_value_input is not None and str(max_value_input).strip() != '':
-        try:
-            max_val = float(max_value_input)
-        except Exception:
-            return jsonify({'error': 'Invalid maxValue.'}), 400
-    else:
-        max_val = float(ref_max) if ref_max is not None else None
-
-    if min_val is None or max_val is None:
-        return jsonify({'error': 'Unknown Product and Characteristic combination. Provide minValue and maxValue for custom input.'}), 400
-
-    if min_val >= max_val:
-        return jsonify({'error': 'minValue must be smaller than maxValue.'}), 400
-
-    target = (min_val + max_val) / 2.0
-    deviation = quantitative - target
-    duration_min = (pd.to_datetime(end_time_str) - pd.to_datetime(start_time_str)).total_seconds() / 60.0
-    if duration_min < 0:
-        duration_min += 1440.0
-
-    is_out_of_bounds = quantitative < min_val or quantitative > max_val
-    features_status = ['ProductDescription', 'CharacteristicDesc', 'Quantative', 'MinValue', 'MaxValue', 'Duration_min']
-    input_status = pd.DataFrame([
-        {
-            'ProductDescription': product,
-            'CharacteristicDesc': characteristic,
-            'Quantative': quantitative,
-            'MinValue': min_val,
-            'MaxValue': max_val,
-            'Duration_min': duration_min,
-        }
-    ])
-
-    if is_out_of_bounds:
-        status_label = 'R'
-        decision_reason = 'hard_rule_fail'
-    else:
-        x_stat = LATEST_ARTIFACTS['preprocessor_status'].transform(input_status)
-        pred_stat_prob = LATEST_ARTIFACTS['model_status'].predict(x_stat)[0][0]
-        pred_stat_idx = int(round(pred_stat_prob))
-        pred_stat_idx = max(0, min(pred_stat_idx, len(LATEST_ARTIFACTS['le_status'].classes_) - 1))
-        status_label = LATEST_ARTIFACTS['le_status'].inverse_transform([pred_stat_idx])[0]
-        decision_reason = 'model_reject' if status_label == 'R' else 'model_accept'
-
-    trend_summary = build_trend_summary(product, characteristic, limit=8) if DB_READY else {}
-    if status_label == 'R':
+    # CAPA
+    capa_action = None
+    if status_label == 'R' and first_char and not is_out_of_bounds:
         capa_input = pd.DataFrame([
             {
                 'ProductDescription': product,
-                'CharacteristicDesc': characteristic,
+                'CharacteristicDesc': first_char,
                 'Quantative': quantitative,
                 'MinValue': min_val,
                 'MaxValue': max_val,
@@ -560,37 +588,36 @@ def predict():
         pred_capa_probs = LATEST_ARTIFACTS['model_capa'].predict(x_capa)[0]
         pred_capa_idx = int(pd.Series(pred_capa_probs).idxmax())
         capa_action = LATEST_ARTIFACTS['le_capa'].inverse_transform([pred_capa_idx])[0]
-    else:
-        capa_action = None
 
     decision_text = (
-        f'Batch for {product} was {"rejected" if status_label == "R" else "accepted"} because {characteristic} '
-        f'was measured at {quantitative:.2f} against the allowed range [{min_val:.2f}, {max_val:.2f}].'
+        f'Batch for {product} was {"rejected" if status_label == "R" else "accepted"} based on all characteristics.'
     )
     measure_text = (
-        f'{characteristic}: value={quantitative:.2f}, limits=[{min_val:.2f}, {max_val:.2f}], deviation={deviation:+.2f}'
-        if status_label == 'R'
-        else f'{characteristic} remained within specification for {product}; no CAPA measure is required.'
+        f'All characteristics evaluated for {product}.'
     )
     analysis_text = (
-        f'RCA focus: {characteristic} is outside the acceptable range for {product}. Trend context: {trend_summary.get("trend_text", "")}'
-        if status_label == 'R'
-        else f'RCA focus: {characteristic} is inside specification for {product}. Trend context: {trend_summary.get("trend_text", "")}'
+        f'RCA focus: Batch evaluation for {product}. Trend context: {trend_summary.get("trend_text", "")}'
     )
 
-    manual_signals = [
-        {
-            'feature': characteristic,
-            'impact': abs(float(deviation)) / max(1e-6, (max_val - min_val)),
-            'value': quantitative,
-            'min_val': min_val,
-            'max_val': max_val,
-        }
-    ]
+    manual_signals = []
+    for char in CHARACTERISTICS:
+        if not pd.isna(row[char]):
+            bounds = LATEST_ARTIFACTS['reference_lookup'].get((product, char))
+            if bounds:
+                min_v, max_v = bounds
+                impact = abs(float(row[char] - (min_v + max_v)/2)) / max(1e-6, (max_v - min_v))
+                manual_signals.append({
+                    'feature': char,
+                    'impact': impact,
+                    'value': row[char],
+                    'min_val': min_v,
+                    'max_val': max_v,
+                })
+
     root_causes, suggestions, warnings = _build_rca_lists(manual_signals)
 
     rca_parts = [
-        f'RCA Report for {product} / {characteristic}.',
+        f'RCA Report for {product}.',
         decision_text,
         measure_text,
         analysis_text,
@@ -602,11 +629,6 @@ def predict():
     if warnings:
         rca_parts.append('Warnings: ' + '; '.join(warnings) + '.')
     rca_report = ' '.join(rca_parts)
-    rca_report = (
-        f'RCA Report for {product} / {characteristic}: {decision_text} {measure_text} '
-        f'{"Corrective action: " + capa_action + "." if capa_action else "No CAPA action required."} '
-        f'{trend_summary.get("trend_text", "")}'
-    ).strip()
 
     response = {
         'status': status_label,
@@ -614,29 +636,37 @@ def predict():
         'decision_text': decision_text,
         'measure_text': measure_text,
         'analysis_text': analysis_text,
+        'rca_report': rca_report,
         'root_causes': root_causes,
         'suggestions': suggestions,
         'warnings': warnings,
-        'rca_report': rca_report,
-        'trend_text': trend_summary.get('trend_text') if trend_summary else '',
-        'trend': trend_summary,
+        'trend_text': trend_summary.get('trend_text', ''),
         'capa_action': capa_action,
-        'capa_text': f'Recommended CAPA for {characteristic}: {capa_action}' if capa_action else 'No CAPA action required because the batch was accepted.',
+        'capa_text': capa_action or 'No CAPA suggested',
+        'trend': trend_summary,
         'derived': {
-            'duration_min': round(duration_min, 2),
-            'min_val': round(min_val, 2),
-            'max_val': round(max_val, 2),
-            'deviation': round(deviation, 2),
+            'duration_min': duration_min,
+            'min_val': min_val or 0,
+            'max_val': max_val or 0,
+            'deviation': deviation,
         },
+        'shap': {
+            'enabled': False,
+            'error': 'SHAP not available for manual input with multiple characteristics',
+        },
+        'capa': {
+            'action': capa_action,
+            'characteristic': first_char,
+        } if capa_action else None,
     }
 
     if DB_READY:
         try:
             store_prediction(
                 {
-                    'batch': payload.get('batch'),
+                    'batch': batch,
                     'product': product,
-                    'characteristic': characteristic,
+                    'characteristic': first_char or 'All',
                     'start_time': start_time_str,
                     'end_time': end_time_str,
                     'quantitative': quantitative,
@@ -652,7 +682,7 @@ def predict():
                     'capa_action': capa_action,
                     'capa_confidence': None,
                     'trend_text': trend_summary.get('trend_text') if trend_summary else None,
-                    'record_source': 'manual_prediction',
+                    'record_source': 'manual_prediction_all',
                     'event_time': datetime.now(timezone.utc).isoformat(timespec='seconds'),
                     'payload_json': response,
                 }

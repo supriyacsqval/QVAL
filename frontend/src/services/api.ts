@@ -189,13 +189,10 @@ export async function getSuggestions(
  */
 export async function predictManual(params: {
   product: string;
-  characteristic: string;
+  characteristics: Record<string, number>;
   startTime: string;
   endTime: string;
-  quantitative: number;
   batch?: string;
-  minValue?: number;
-  maxValue?: number;
 }): Promise<AnalysisResult> {
   const response = await fetch(`${API_BASE_URL}/api/predict`, {
     method: 'POST',

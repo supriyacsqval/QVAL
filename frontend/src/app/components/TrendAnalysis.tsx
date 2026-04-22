@@ -9,7 +9,7 @@ interface TrendAnalysisProps {
 }
 
 export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAnalysisProps) {
-  const [trendType, setTrendType] = useState<'product' | 'batch'>('product');
+  const [trendType, setTrendType] = useState<'product' | 'batch' | 'all'>('product');
   const [value, setValue] = useState('');
   const [characteristic, setCharacteristic] = useState('');
   const [valueSuggestions, setValueSuggestions] = useState<string[]>([]);
@@ -19,6 +19,11 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
   useEffect(() => {
     const loadSuggestions = async () => {
       try {
+        if (trendType === 'all') {
+          setValueSuggestions([]);
+          setCharacteristicSuggestions([]);
+          return;
+        }
         if (trendType === 'batch') {
           const items = await getSuggestions('batch', value, { limit: 20 });
           setValueSuggestions(items);
@@ -56,7 +61,7 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!value.trim()) {
+    if (trendType !== 'all' && !value.trim()) {
       onError(`Please enter a ${trendType} name`);
       return;
     }
@@ -68,6 +73,8 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
       let result;
       if (trendType === 'batch') {
         result = await getBatchTrend(value);
+      } else if (trendType === 'all') {
+        result = await getTrend('', undefined);
       } else {
         result = await getTrend(value, characteristic.trim() || undefined);
       }
@@ -94,14 +101,14 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
       {/* Trend Type Selector */}
       <div>
         <label className="block text-sm font-medium mb-2">Analyze By</label>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => {
               setTrendType('product');
               setValue('');
             }}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${
+            className={`px-3 py-2 rounded-lg text-sm transition-colors ${
               trendType === 'product'
                 ? 'bg-blue-100 text-blue-700 border border-blue-200'
                 : 'bg-white border border-black/[0.08] hover:bg-slate-50'
@@ -115,7 +122,7 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
               setTrendType('batch');
               setValue('');
             }}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${
+            className={`px-3 py-2 rounded-lg text-sm transition-colors ${
               trendType === 'batch'
                 ? 'bg-blue-100 text-blue-700 border border-blue-200'
                 : 'bg-white border border-black/[0.08] hover:bg-slate-50'
@@ -123,32 +130,68 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
           >
             Batch/Tablet
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTrendType('all');
+              setValue('');
+            }}
+            className={`px-3 py-2 rounded-lg text-sm transition-colors ${
+              trendType === 'all'
+                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                : 'bg-white border border-black/[0.08] hover:bg-slate-50'
+            }`}
+          >
+            All Products
+          </button>
         </div>
       </div>
 
       {/* Input Field */}
       <div>
         <label className="block text-sm font-medium mb-1.5">
-          {trendType === 'batch' ? 'Batch/Tablet Name' : 'Product Name'} *
+          {trendType === 'batch' ? 'Batch/Tablet Name' : trendType === 'all' ? 'All Products Summary' : 'Product Name'} *
         </label>
-        <input
-          list="trend-value-suggestions"
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={
-            trendType === 'batch'
-              ? 'e.g., BATCH-2024-001'
-              : 'e.g., Product A'
-          }
-          className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          required
-        />
-        <datalist id="trend-value-suggestions">
-          {valueSuggestions.map((item) => (
-            <option key={item} value={item} />
-          ))}
-        </datalist>
+        {trendType === 'all' ? (
+          <div className="text-sm opacity-60 p-2 bg-slate-50 rounded">
+            This will show a summary of all products in the database.
+          </div>
+        ) : trendType === 'batch' ? (
+          <input
+            list="trend-value-suggestions"
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={
+              trendType === 'batch'
+                ? 'e.g., BATCH-2024-001'
+                : 'e.g., Product A'
+            }
+            className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            required
+          />
+        ) : (
+          <select
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            required
+          >
+            <option value="">Select a product...</option>
+            {valueSuggestions.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        )}
+        {trendType === 'batch' && (
+          <datalist id="trend-value-suggestions">
+            {valueSuggestions.map((item) => (
+              <option key={item} value={item} />
+            ))}
+          </datalist>
+        )}
       </div>
 
       {trendType === 'product' && (
@@ -174,13 +217,15 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
       <div className="text-xs opacity-60 p-2 bg-slate-50 rounded">
         {trendType === 'batch'
           ? 'Enter the tablet/batch ID to see all measurements and results over time'
+          : trendType === 'all'
+          ? 'Get a summary of all products and their quality metrics'
           : 'Enter the product name to see overall trend and quality metrics'}
       </div>
 
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={isLoading || !value.trim()}
+        disabled={isLoading || (trendType !== 'all' && !value.trim())}
         className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50"
       >
         <Send className="w-4 h-4" />

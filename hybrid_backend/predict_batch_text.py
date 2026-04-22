@@ -18,9 +18,9 @@ from hybrid_core import (
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LATEST_DIR = os.path.join(BASE_DIR, '..', 'sid')
+LATEST_DIR = os.path.join(BASE_DIR, '..', 'BACKEND', 'models', 'latest')
 ARTIFACTS_DIR = os.path.join(BASE_DIR, 'artifacts')
-DEFAULT_INPUT_CSV = os.path.join(LATEST_DIR, 'test.csv')
+DEFAULT_INPUT_CSV = os.path.join(BASE_DIR, 'test .csv')
 
 
 def build_measure_text(capa_res: dict) -> str:

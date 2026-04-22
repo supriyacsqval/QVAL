@@ -11,17 +11,23 @@ interface ManualInputFormProps {
 export default function ManualInputForm({ onStart, onComplete, onError }: ManualInputFormProps) {
   const [products, setProducts] = useState<Record<string, Array<{ characteristic: string; min_value: number; max_value: number; target: number }>>>({});
   const [product, setProduct] = useState('');
-  const [characteristic, setCharacteristic] = useState('');
-  const [quantitative, setQuantitative] = useState('');
+  const [characteristics, setCharacteristics] = useState<Record<string, string>>({});
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [batch, setBatch] = useState('');
-  const [minValue, setMinValue] = useState('');
-  const [maxValue, setMaxValue] = useState('');
   const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
-  const [characteristicSuggestions, setCharacteristicSuggestions] = useState<string[]>([]);
   const [batchSuggestions, setBatchSuggestions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  const CHARACTERISTICS = [
+    'Potency',
+    'PH Level',
+    'Impurities',
+    'Dissolution Rate - 15 Mins',
+    'Dissolution Rate - 30 Mins',
+    'Dissolution Rate - 40 Mins',
+    'Process Temp',
+  ];
 
   useEffect(() => {
     getProductOptionsDetail()
@@ -44,21 +50,6 @@ export default function ManualInputForm({ onStart, onComplete, onError }: Manual
   useEffect(() => {
     const loadSuggestions = async () => {
       try {
-        const items = await getSuggestions('characteristic', characteristic, {
-          product: product.trim() || undefined,
-          limit: 20,
-        });
-        setCharacteristicSuggestions(items);
-      } catch {
-        setCharacteristicSuggestions([]);
-      }
-    };
-    loadSuggestions();
-  }, [product, characteristic]);
-
-  useEffect(() => {
-    const loadSuggestions = async () => {
-      try {
         const items = await getSuggestions('batch', batch, { limit: 20 });
         setBatchSuggestions(items);
       } catch {
@@ -68,24 +59,20 @@ export default function ManualInputForm({ onStart, onComplete, onError }: Manual
     loadSuggestions();
   }, [batch]);
 
-  const selectedCharacteristicMeta = useMemo(() => {
-    const list = products[product] || [];
-    return list.find((item) => item.characteristic === characteristic) || null;
-  }, [products, product, characteristic]);
-
-  useEffect(() => {
-    if (!selectedCharacteristicMeta) {
-      return;
-    }
-    setMinValue(String(selectedCharacteristicMeta.min_value));
-    setMaxValue(String(selectedCharacteristicMeta.max_value));
-  }, [selectedCharacteristicMeta]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!product || !characteristic || !quantitative || !startTime || !endTime || !minValue || !maxValue) {
+    if (!product || !startTime || !endTime) {
       onError('Please fill in all required fields');
+      return;
+    }
+
+    // Check if at least one characteristic is filled
+    const filledCharacteristics = Object.fromEntries(
+      Object.entries(characteristics).filter(([_, value]) => value.trim() !== '')
+    );
+    if (Object.keys(filledCharacteristics).length === 0) {
+      onError('Please provide values for at least one characteristic');
       return;
     }
 
@@ -93,27 +80,28 @@ export default function ManualInputForm({ onStart, onComplete, onError }: Manual
     setIsLoading(true);
 
     try {
+      const parsedCharacteristics = Object.fromEntries(
+        Object.entries(filledCharacteristics).map(([key, value]) => [key, parseFloat(value)])
+      );
+
       const result = await predictManual({
         product,
-        characteristic,
+        characteristics: parsedCharacteristics,
         startTime,
         endTime,
-        quantitative: parseFloat(quantitative),
         batch: batch || undefined,
-        minValue: minValue ? parseFloat(minValue) : undefined,
-        maxValue: maxValue ? parseFloat(maxValue) : undefined,
       });
 
       onComplete({
         id: Date.now().toString(),
         mode: 'manual',
-        input: { product, characteristic, quantitative, batch },
+        input: { product, characteristics: parsedCharacteristics, batch },
         result,
         timestamp: new Date(),
       });
 
       // Reset form
-      setQuantitative('');
+      setCharacteristics({});
       setStartTime('');
       setEndTime('');
       setBatch('');
@@ -145,37 +133,24 @@ export default function ManualInputForm({ onStart, onComplete, onError }: Manual
         </datalist>
       </div>
 
-      {/* Characteristic */}
+      {/* Characteristics */}
       <div>
-        <label className="block text-sm font-medium mb-1.5">Characteristic *</label>
-        <input
-          list="manual-characteristic-suggestions"
-          type="text"
-          value={characteristic}
-          onChange={(e) => setCharacteristic(e.target.value)}
-          placeholder="Type characteristic"
-          className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
-          required
-        />
-        <datalist id="manual-characteristic-suggestions">
-          {characteristicSuggestions.map((item) => (
-            <option key={item} value={item} />
+        <label className="block text-sm font-medium mb-1.5">Characteristics (provide values for all or at least one)</label>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {CHARACTERISTICS.map((char) => (
+            <div key={char}>
+              <label className="block text-xs font-medium mb-1">{char}</label>
+              <input
+                type="number"
+                step="0.01"
+                value={characteristics[char] || ''}
+                onChange={(e) => setCharacteristics(prev => ({ ...prev, [char]: e.target.value }))}
+                placeholder={`Value for ${char}`}
+                className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
           ))}
-        </datalist>
-      </div>
-
-      {/* Quantitative Value */}
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Value *</label>
-        <input
-          type="number"
-          step="0.01"
-          value={quantitative}
-          onChange={(e) => setQuantitative(e.target.value)}
-          placeholder="e.g., 25.5"
-          className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-          required
-        />
+        </div>
       </div>
 
       {/* Start Time */}
@@ -218,34 +193,6 @@ export default function ManualInputForm({ onStart, onComplete, onError }: Manual
             <option key={item} value={item} />
           ))}
         </datalist>
-      </div>
-
-      {/* Spec bounds */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Min Value *</label>
-          <input
-            type="number"
-            step="0.01"
-            value={minValue}
-            onChange={(e) => setMinValue(e.target.value)}
-            placeholder="e.g., 95"
-            className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            required
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1.5">Max Value *</label>
-          <input
-            type="number"
-            step="0.01"
-            value={maxValue}
-            onChange={(e) => setMaxValue(e.target.value)}
-            placeholder="e.g., 103"
-            className="w-full px-3 py-2 border border-black/[0.08] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            required
-          />
-        </div>
       </div>
 
       {/* Submit Button */}

@@ -19,7 +19,7 @@ from hybrid_core import (
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LATEST_DIR = os.path.join(BASE_DIR, '..', 'sid')
+LATEST_DIR = os.path.join(BASE_DIR, '..', 'BACKEND', 'models', 'latest')
 ARTIFACTS_DIR = os.path.join(BASE_DIR, 'artifacts')
 
 UNIFIED_CSV = os.path.join(BASE_DIR, 'Unified_Dataset.csv')

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Download, X, FileText, TrendingUp, Settings } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter } from 'recharts';
 import { exportReport, downloadFile } from '../../services/api';
 
 interface AnalysisResultProps {
@@ -260,15 +261,101 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
         {/* Trend Results */}
         {isTrendResult && (
           <div className="space-y-4">
+            {/* All Products Summary */}
+            {analysis.result.all_products && analysis.result.products && (
+              <div>
+                <h4 className="font-semibold mb-3">All Products Summary ({analysis.result.total_products} products)</h4>
+                <div className="max-h-96 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-black/[0.08] sticky top-0 bg-white">
+                      <tr>
+                        <th className="text-left py-2 px-2">Product</th>
+                        <th className="text-left py-2 px-2">Total Checks</th>
+                        <th className="text-left py-2 px-2">Rejected</th>
+                        <th className="text-left py-2 px-2">Reject Rate</th>
+                        <th className="text-left py-2 px-2">Avg Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysis.result.products.map((product: any, idx: number) => (
+                        <tr key={idx} className="border-b border-black/[0.08] hover:bg-slate-50">
+                          <td className="py-2 px-2 font-medium">{product.product}</td>
+                          <td className="py-2 px-2 text-center">{product.total_rows}</td>
+                          <td className="py-2 px-2 text-center">
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+                              {product.reject_rows}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            {(product.reject_rate * 100).toFixed(1)}%
+                          </td>
+                          <td className="py-2 px-2 text-center font-mono">
+                            {product.avg_quantitative?.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Summary */}
-            {analysis.result.trend_text && (
+            {analysis.result.trend_text && !analysis.result.all_products && (
               <div className="p-4 bg-slate-50 rounded-lg">
                 <p className="text-sm">{analysis.result.trend_text}</p>
               </div>
             )}
 
+            {/* Chart */}
+            {analysis.result.records.length > 0 && !analysis.result.all_products && (
+              <div>
+                <h4 className="font-semibold mb-3">Trend Chart</h4>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={analysis.result.records.map((record: any) => ({
+                      time: new Date(record.event_time).getTime(),
+                      value: record.quantitative || 0,
+                      status: record.status,
+                      date: record.event_time.split(' ')[0]
+                    })).sort((a, b) => a.time - b.time)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="time" 
+                        type="number" 
+                        scale="time" 
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={(value) => new Date(value).toLocaleDateString()}
+                      />
+                      <YAxis dataKey="value" />
+                      <Tooltip 
+                        labelFormatter={(value) => new Date(value).toLocaleString()}
+                        formatter={(value: any, name: string, props: any) => [
+                          `${value?.toFixed(2)} (${props.payload.status === 'R' ? 'Rejected' : 'Accepted'})`,
+                          'Value'
+                        ]}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#8884d8" 
+                        dot={(props: any) => (
+                          <circle 
+                            cx={props.cx} 
+                            cy={props.cy} 
+                            r={4} 
+                            fill={props.payload.status === 'R' ? '#ef4444' : '#22c55e'} 
+                          />
+                        )}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* Records Table */}
-            {analysis.result.records.length > 0 && (
+            {analysis.result.records.length > 0 && !analysis.result.all_products && (
               <div>
                 <h4 className="font-semibold mb-3">Recent Records ({analysis.result.total_records})</h4>
                 <div className="max-h-64 overflow-y-auto">

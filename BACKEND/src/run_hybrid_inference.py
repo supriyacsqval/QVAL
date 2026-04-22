@@ -22,7 +22,7 @@ LATEST_DIR = os.path.join(PROJECT_DIR, 'models', 'latest')
 ARTIFACTS_DIR = os.path.join(PROJECT_DIR, 'artifacts')
 DATA_DIR = os.path.join(PROJECT_DIR, 'data')
 
-TEST_CSV = os.path.join(DATA_DIR, 'test.csv')
+TEST_CSV = os.path.join(DATA_DIR, 'test .csv')
 OUT_CSV = os.path.join(ARTIFACTS_DIR, 'hybrid_test_predictions.csv')
 OUT_PNG = os.path.join(ARTIFACTS_DIR, 'hybrid_test_summary.png')
 
