@@ -90,10 +90,12 @@ except Exception as exc:
 def _normalize_uploaded_rows(df: pd.DataFrame) -> pd.DataFrame:
     normalized = df.copy()
     aliases = {
-        'Batch': ['Batch', 'batch', 'Batch Number', 'BatchNumber', 'UniqueID', 'Unique Id'],
+        'Batch': ['Batch', 'batch', 'Batch Number', 'BatchNumber', 'UniqueID', 'Unique Id', 'Inspection Lot', 'InspectionLot'],
         'ProductDescription': ['ProductDescription', 'Product Description', 'product', 'Product', 'ProductName', 'Product Name', 'Material'],
-        'CharacteristicDesc': ['CharacteristicDesc', 'Characteristic', 'TestCharacteristic', 'Test Characteristic', 'Characteristic Name'],
+        'CharacteristicDesc': ['CharacteristicDesc', 'Characteristic', 'TestCharacteristic', 'Test Characteristic', 'Characteristic Name', 'Characteristic Desc'],
         'Quantative': ['Quantative', 'Quantitative', 'Value', 'value', 'Measure', 'Measurement'],
+        'MinValue': ['MinValue', 'Min Value', 'Lower Limit', 'LowerLimit'],
+        'MaxValue': ['MaxValue', 'Max Value', 'Upper Limit', 'UpperLimit'],
         'Valuation': ['Valuation', 'Status', 'status', 'Result', 'result'],
         'Qualitative': ['Qualitative', 'qualitative'],
         'StartDate': ['StartDate', 'Start Date', 'start_date', 'Date'],
@@ -124,6 +126,10 @@ def _normalize_uploaded_rows(df: pd.DataFrame) -> pd.DataFrame:
         normalized['CharacteristicDesc'] = 'Unknown Characteristic'
     if 'Valuation' not in normalized.columns:
         normalized['Valuation'] = 'A'
+    if 'MinValue' not in normalized.columns:
+        normalized['MinValue'] = np.nan
+    if 'MaxValue' not in normalized.columns:
+        normalized['MaxValue'] = np.nan
 
     return normalized
 
@@ -245,8 +251,18 @@ def _build_batch_prediction_result(row, meta_model=None, shap_explainer=None):
         'shap_ranked_features': [],
         'shap_error': '',
     }
-    if hybrid_res['status'] == 'R' and shap_explainer is not None:
+    shap_reason_allowlist = {
+        'meta_stacking_reject',
+        'rf_threshold_reject',
+        'consensus_reject',
+        'blended_reject',
+        'dual_warning_reject',
+    }
+    shap_enabled = hybrid_res['status'] == 'R' and hybrid_res.get('reason') in shap_reason_allowlist
+    if shap_enabled and shap_explainer is not None:
         shap_res = predict_shap_for_row(row, RF_PIPELINE, RF_FEATURE_COLUMNS, shap_explainer=shap_explainer)
+    elif hybrid_res['status'] == 'R' and not shap_enabled:
+        shap_res['shap_error'] = f"SHAP skipped for reject reason '{hybrid_res.get('reason')}'."
 
     capa_res = {
         'capa_action': None,
@@ -331,7 +347,7 @@ def _build_batch_prediction_result(row, meta_model=None, shap_explainer=None):
         'source_capa_details': source_capa_details,
         'source_capa_text': (row.get('TaskText') or row.get('ItemText') or ''),
         'shap': {
-            'enabled': hybrid_res['status'] == 'R' and shap_explainer is not None,
+            'enabled': shap_enabled and shap_explainer is not None,
             'top_feature': shap_res.get('shap_top_feature'),
             'top_contribution': shap_res.get('shap_top_contribution'),
             'top_feature_value': shap_res.get('shap_top_feature_value'),
@@ -521,12 +537,14 @@ def predict():
     if not isinstance(characteristics, dict):
         return jsonify({'error': 'characteristics must be a dict.'}), 400
 
-    # Create row
+    # Create row used by hybrid decision path (same logic as batch predictions).
     row = {
         'ProductName': product,
         'StartTime': start_time_str,
         'EndTime': end_time_str,
         'Batch': batch,
+        'UniqueID': batch or f"MANUAL-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+        'Appearance': 'Complies',
     }
     for char in CHARACTERISTICS:
         val = characteristics.get(char)
@@ -538,83 +556,29 @@ def predict():
         else:
             row[char] = np.nan
 
-    # Predict
-    latest_result = predict_latest_for_row(pd.Series(row), LATEST_ARTIFACTS)
-    status_label = latest_result['status']
-    decision_reason = latest_result.get('decision_reason', 'model')
+    prediction = _build_batch_prediction_result(pd.Series(row), meta_model=META_MODEL, shap_explainer=SHAP_EXPLAINER)
 
+    status_label = prediction['hybrid']['status']
+    decision_reason = prediction['hybrid']['reason']
     duration_min = duration_minutes(start_time_str, end_time_str)
 
-    # For derived, use the first characteristic with value
+    # For trend context, use CAPA characteristic first, then first provided characteristic.
     first_char = None
-    quantitative = None
-    min_val = None
-    max_val = None
     for char in CHARACTERISTICS:
         if not pd.isna(row[char]):
             first_char = char
-            quantitative = row[char]
-            bounds = LATEST_ARTIFACTS['reference_lookup'].get((product, char))
-            if bounds:
-                min_val, max_val = bounds
             break
 
-    if first_char:
-        target = (min_val + max_val) / 2.0 if min_val is not None and max_val is not None else quantitative
-        deviation = quantitative - target
-        is_out_of_bounds = quantitative < min_val or quantitative > max_val if min_val is not None and max_val is not None else False
-    else:
-        deviation = 0
-        is_out_of_bounds = False
+    trend_characteristic = prediction.get('capa', {}).get('characteristic') or first_char
+    trend_summary = build_trend_summary(product, trend_characteristic, limit=8) if DB_READY and trend_characteristic else {}
 
-    # Trend summary for the first characteristic
-    trend_summary = build_trend_summary(product, first_char, limit=8) if DB_READY and first_char else {}
-
-    # CAPA
-    capa_action = None
-    if status_label == 'R' and first_char and not is_out_of_bounds:
-        capa_input = pd.DataFrame([
-            {
-                'ProductDescription': product,
-                'CharacteristicDesc': first_char,
-                'Quantative': quantitative,
-                'MinValue': min_val,
-                'MaxValue': max_val,
-                'Duration_min': duration_min,
-                'DeviationValue': deviation,
-            }
-        ])
-        x_capa = LATEST_ARTIFACTS['preprocessor_capa'].transform(capa_input)
-        pred_capa_probs = LATEST_ARTIFACTS['model_capa'].predict(x_capa)[0]
-        pred_capa_idx = int(pd.Series(pred_capa_probs).idxmax())
-        capa_action = LATEST_ARTIFACTS['le_capa'].inverse_transform([pred_capa_idx])[0]
-
-    decision_text = (
-        f'Batch for {product} was {"rejected" if status_label == "R" else "accepted"} based on all characteristics.'
-    )
-    measure_text = (
-        f'All characteristics evaluated for {product}.'
-    )
-    analysis_text = (
-        f'RCA focus: Batch evaluation for {product}. Trend context: {trend_summary.get("trend_text", "")}'
-    )
-
-    manual_signals = []
-    for char in CHARACTERISTICS:
-        if not pd.isna(row[char]):
-            bounds = LATEST_ARTIFACTS['reference_lookup'].get((product, char))
-            if bounds:
-                min_v, max_v = bounds
-                impact = abs(float(row[char] - (min_v + max_v)/2)) / max(1e-6, (max_v - min_v))
-                manual_signals.append({
-                    'feature': char,
-                    'impact': impact,
-                    'value': row[char],
-                    'min_val': min_v,
-                    'max_val': max_v,
-                })
-
-    root_causes, suggestions, warnings = _build_rca_lists(manual_signals)
+    root_causes = prediction.get('root_causes') or []
+    suggestions = prediction.get('suggestions') or []
+    warnings = prediction.get('warnings') or []
+    decision_text = prediction.get('decision_text') or ''
+    measure_text = prediction.get('measure_text') or ''
+    analysis_text = prediction.get('analysis_text') or ''
+    capa_action = prediction.get('capa', {}).get('action')
 
     rca_parts = [
         f'RCA Report for {product}.',
@@ -646,18 +610,12 @@ def predict():
         'trend': trend_summary,
         'derived': {
             'duration_min': duration_min,
-            'min_val': min_val or 0,
-            'max_val': max_val or 0,
-            'deviation': deviation,
+            'min_val': prediction.get('capa', {}).get('measure_min') or 0,
+            'max_val': prediction.get('capa', {}).get('measure_max') or 0,
+            'deviation': prediction.get('capa', {}).get('measure_deviation') or 0,
         },
-        'shap': {
-            'enabled': False,
-            'error': 'SHAP not available for manual input with multiple characteristics',
-        },
-        'capa': {
-            'action': capa_action,
-            'characteristic': first_char,
-        } if capa_action else None,
+        'shap': prediction.get('shap'),
+        'capa': prediction.get('capa'),
     }
 
     if DB_READY:
@@ -666,24 +624,24 @@ def predict():
                 {
                     'batch': batch,
                     'product': product,
-                    'characteristic': first_char or 'All',
+                    'characteristic': prediction.get('capa', {}).get('characteristic') or first_char or 'All',
                     'start_time': start_time_str,
                     'end_time': end_time_str,
-                    'quantitative': quantitative,
-                    'min_value': min_val,
-                    'max_value': max_val,
+                    'quantitative': prediction.get('capa', {}).get('measure_value'),
+                    'min_value': prediction.get('capa', {}).get('measure_min'),
+                    'max_value': prediction.get('capa', {}).get('measure_max'),
                     'duration_min': duration_min,
-                    'deviation': deviation,
+                    'deviation': prediction.get('capa', {}).get('measure_deviation'),
                     'status': status_label,
                     'decision_reason': decision_reason,
                     'decision_text': decision_text,
                     'measure_text': measure_text,
                     'analysis_text': analysis_text,
                     'capa_action': capa_action,
-                    'capa_confidence': None,
+                    'capa_confidence': prediction.get('capa', {}).get('confidence'),
                     'trend_text': trend_summary.get('trend_text') if trend_summary else None,
                     'record_source': 'manual_prediction_all',
-                    'event_time': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                    'event_time': str(end_time_str or start_time_str or datetime.now(timezone.utc).isoformat(timespec='seconds')),
                     'payload_json': response,
                 }
             )
@@ -740,14 +698,14 @@ def batch_predict():
                         {
                             'batch': result['batch'],
                             'product': result['product'],
-                            'characteristic': None,
+                            'characteristic': result['capa'].get('characteristic'),
                             'start_time': result['start_time'],
                             'end_time': result['end_time'],
-                            'quantitative': None,
-                            'min_value': None,
-                            'max_value': None,
+                            'quantitative': result['capa'].get('measure_value'),
+                            'min_value': result['capa'].get('measure_min'),
+                            'max_value': result['capa'].get('measure_max'),
                             'duration_min': None,
-                            'deviation': None,
+                            'deviation': result['capa'].get('measure_deviation'),
                             'status': result['hybrid']['status'],
                             'decision_reason': result['hybrid']['reason'],
                             'decision_text': result['decision_text'],
@@ -755,9 +713,16 @@ def batch_predict():
                             'analysis_text': result['analysis_text'],
                             'capa_action': result['capa']['action'],
                             'capa_confidence': result['capa']['confidence'],
-                            'trend_text': result['analysis_text'],
+                            'trend_text': None,
+                            'notification_id': source_capa.get('notification_id'),
+                            'task_characteristic': source_capa.get('task_characteristic') or result['capa'].get('characteristic'),
+                            'direction': source_capa.get('direction'),
+                            'correction_value': source_capa.get('correction_value'),
+                            'item_text': source_capa.get('item_text'),
+                            'task_text': source_capa.get('task_text'),
+                            'source_sheet': source_name,
                             'record_source': 'batch_prediction',
-                            'event_time': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                            'event_time': str(result.get('end_time') or result.get('start_time') or datetime.now(timezone.utc).isoformat(timespec='seconds')),
                             'payload_json': {
                                 **result,
                                 'source_capa_details': source_capa,

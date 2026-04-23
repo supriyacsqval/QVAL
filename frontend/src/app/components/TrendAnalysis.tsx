@@ -74,9 +74,9 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
       if (trendType === 'batch') {
         result = await getBatchTrend(value);
       } else if (trendType === 'all') {
-        result = await getTrend('', undefined);
+        result = await getTrend('', undefined, 100);
       } else {
-        result = await getTrend(value, characteristic.trim() || undefined);
+        result = await getTrend(value, characteristic.trim() || undefined, 60);
       }
 
       onComplete({
@@ -226,7 +226,7 @@ export default function TrendAnalysis({ onStart, onComplete, onError }: TrendAna
       <button
         type="submit"
         disabled={isLoading || (trendType !== 'all' && !value.trim())}
-        className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50"
+        className="w-full bg-gradient-to-r from-sky-600 to-teal-600 text-white py-2 rounded-lg font-medium flex items-center justify-center gap-2 hover:from-sky-700 hover:to-teal-700 transition-colors disabled:opacity-50"
       >
         <Send className="w-4 h-4" />
         {isLoading ? 'Loading...' : 'Get Trend Data'}

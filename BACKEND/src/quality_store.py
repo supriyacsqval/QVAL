@@ -70,6 +70,21 @@ def init_store() -> None:
         conn.execute('CREATE INDEX IF NOT EXISTS idx_quality_history_product ON quality_history(product, characteristic, event_time)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_quality_history_status ON quality_history(status, event_time)')
 
+        # Backward-compatible schema upgrade for existing DBs.
+        existing_cols = {row[1] for row in conn.execute('PRAGMA table_info(quality_history)').fetchall()}
+        optional_columns = {
+            'notification_id': 'TEXT',
+            'task_characteristic': 'TEXT',
+            'direction': 'TEXT',
+            'correction_value': 'REAL',
+            'item_text': 'TEXT',
+            'task_text': 'TEXT',
+            'source_sheet': 'TEXT',
+        }
+        for col_name, col_type in optional_columns.items():
+            if col_name not in existing_cols:
+                conn.execute(f'ALTER TABLE quality_history ADD COLUMN {col_name} {col_type}')
+
         row_count = conn.execute('SELECT COUNT(*) AS c FROM quality_history').fetchone()['c']
         if row_count == 0 and os.path.exists(SEED_CSV):
             _seed_from_dataset(conn)
@@ -139,6 +154,13 @@ def _seed_from_dataset(conn: sqlite3.Connection) -> None:
                 _to_text(row.get('TaskText')),
                 None,
                 None,
+                _to_text(row.get('NotificationID')),
+                _to_text(row.get('TaskCharacteristic')),
+                _to_text(row.get('Increase/Decrease')),
+                _to_float(row.get('CorrectionValue')),
+                item_text,
+                task_text,
+                'Unified_Dataset.csv',
                 json.dumps(payload, default=str),
             )
         )
@@ -150,8 +172,10 @@ def _seed_from_dataset(conn: sqlite3.Connection) -> None:
             start_time, end_time, quantitative, min_value, max_value,
             duration_min, deviation, status, decision_reason,
             decision_text, measure_text, analysis_text, capa_action,
-            capa_confidence, trend_text, payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            capa_confidence, trend_text, notification_id, task_characteristic,
+            direction, correction_value, item_text, task_text, source_sheet,
+            payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         rows,
     )
@@ -166,30 +190,39 @@ def store_prediction(record: Dict[str, object]) -> None:
                 start_time, end_time, quantitative, min_value, max_value,
                 duration_min, deviation, status, decision_reason,
                 decision_text, measure_text, analysis_text, capa_action,
-                capa_confidence, trend_text, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                capa_confidence, trend_text, notification_id, task_characteristic,
+                direction, correction_value, item_text, task_text, source_sheet,
+                payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
-                record.get('event_time') or pd.Timestamp.now(tz='UTC').isoformat(),
-                record.get('record_source', 'prediction'),
-                record.get('batch'),
-                record.get('product'),
-                record.get('characteristic'),
-                record.get('start_time'),
-                record.get('end_time'),
+                _to_text(record.get('event_time')) or pd.Timestamp.now(tz='UTC').isoformat(),
+                _to_text(record.get('record_source')) or 'prediction',
+                _to_text(record.get('batch')),
+                _to_text(record.get('product')),
+                _to_text(record.get('characteristic')),
+                _to_text(record.get('start_time')),
+                _to_text(record.get('end_time')),
                 _to_float(record.get('quantitative')),
                 _to_float(record.get('min_value')),
                 _to_float(record.get('max_value')),
                 _to_float(record.get('duration_min')),
                 _to_float(record.get('deviation')),
-                record.get('status'),
-                record.get('decision_reason'),
-                record.get('decision_text'),
-                record.get('measure_text'),
-                record.get('analysis_text'),
-                record.get('capa_action'),
+                _to_text(record.get('status')),
+                _to_text(record.get('decision_reason')),
+                _to_text(record.get('decision_text')),
+                _to_text(record.get('measure_text')),
+                _to_text(record.get('analysis_text')),
+                _to_text(record.get('capa_action')),
                 _to_float(record.get('capa_confidence')),
-                record.get('trend_text'),
+                _to_text(record.get('trend_text')),
+                _to_text(record.get('notification_id')),
+                _to_text(record.get('task_characteristic')),
+                _to_text(record.get('direction')),
+                _to_float(record.get('correction_value')),
+                _to_text(record.get('item_text')),
+                _to_text(record.get('task_text')),
+                _to_text(record.get('source_sheet')),
                 json.dumps(record.get('payload_json', {}), default=str),
             ),
         )
@@ -309,6 +342,7 @@ def build_trend_summary(product: str, characteristic: Optional[str] = None, limi
         'avg_deviation': _to_float(stats.get('avg_deviation')),
         'trend_text': trend_text,
         'recent_rows': recent_rows,
+        'records': recent_rows,
         'characteristic_summary': [
             {
                 'characteristic': _to_text(row['characteristic']),

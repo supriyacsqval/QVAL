@@ -32,7 +32,9 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
   };
 
   const isBatchResult = analysis.result.results && Array.isArray(analysis.result.results);
-  const isTrendResult = analysis.result.records && Array.isArray(analysis.result.records);
+  const isAllProductsTrend = analysis.result?.all_products === true && Array.isArray(analysis.result?.products);
+  const trendRecords = Array.isArray(analysis.result?.records) ? analysis.result.records : [];
+  const isTrendResult = isAllProductsTrend || trendRecords.length > 0 || analysis.mode === 'trend';
 
   const getModeIcon = () => {
     switch (analysis.mode) {
@@ -52,7 +54,7 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
       exit={{ opacity: 0, y: -16 }}
       whileHover={{ y: -2 }}
       transition={{ duration: 0.28, ease: 'easeOut' }}
-      className="bg-white/90 border border-black/[0.08] rounded-xl overflow-hidden shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
+      className="bg-white/90 border border-slate-900/[0.08] rounded-2xl overflow-hidden shadow-[0_10px_28px_rgba(15,23,42,0.10)]"
     >
       {/* Header */}
       <div className="border-b border-black/[0.08] p-4 bg-gradient-to-r from-slate-50/90 to-teal-50/40">
@@ -67,9 +69,12 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
                 </span>
               </div>
               <p className="text-sm opacity-60">
-                {analysis.mode === 'manual' && 
-                  `${analysis.input.product} / ${analysis.input.characteristic}`
-                }
+                {analysis.mode === 'manual' && (
+                  (() => {
+                    const count = Object.keys(analysis.input.characteristics || {}).length;
+                    return `${analysis.input.product || 'Manual input'} · ${count} characteristic${count === 1 ? '' : 's'}`;
+                  })()
+                )}
                 {analysis.mode === 'csv' && analysis.input.filename}
                 {analysis.mode === 'trend' && 
                   `${analysis.input.type === 'batch' ? 'Batch' : 'Product'}: ${analysis.input.value}${analysis.input.characteristic ? ` / ${analysis.input.characteristic}` : ''}`
@@ -308,12 +313,12 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
             )}
 
             {/* Chart */}
-            {analysis.result.records.length > 0 && !analysis.result.all_products && (
+            {trendRecords.length > 0 && !analysis.result.all_products && (
               <div>
                 <h4 className="font-semibold mb-3">Trend Chart</h4>
                 <div className="h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={analysis.result.records.map((record: any) => ({
+                    <LineChart data={trendRecords.map((record: any) => ({
                       time: new Date(record.event_time).getTime(),
                       value: record.quantitative || 0,
                       status: record.status,
@@ -355,9 +360,9 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
             )}
 
             {/* Records Table */}
-            {analysis.result.records.length > 0 && !analysis.result.all_products && (
+            {trendRecords.length > 0 && !analysis.result.all_products && (
               <div>
-                <h4 className="font-semibold mb-3">Recent Records ({analysis.result.total_records})</h4>
+                <h4 className="font-semibold mb-3">Recent Records ({analysis.result.total_records ?? analysis.result.total_rows ?? trendRecords.length})</h4>
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="border-b border-black/[0.08] sticky top-0 bg-white">
@@ -370,7 +375,7 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
                       </tr>
                     </thead>
                     <tbody>
-                      {analysis.result.records.map((record: any, idx: number) => (
+                      {trendRecords.map((record: any, idx: number) => (
                         <tr key={idx} className="border-b border-black/[0.08] hover:bg-slate-50">
                           <td className="py-2 px-2 text-xs">{record.event_time}</td>
                           <td className="py-2 px-2 text-xs">{record.product}</td>
@@ -395,7 +400,7 @@ export default function AnalysisResult({ analysis, onDelete }: AnalysisResultPro
               </div>
             )}
 
-            {analysis.result.records.length === 0 && (
+            {trendRecords.length === 0 && !analysis.result.all_products && (
               <p className="text-sm opacity-60">No records found for this query.</p>
             )}
           </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
 import { predictBatchFile } from '../../services/api';
 
@@ -12,11 +12,27 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isLoading) {
+      return;
+    }
+
+    setUploadProgress(8);
+    const timer = window.setInterval(() => {
+      setUploadProgress((prev) => (prev >= 92 ? prev : prev + 8));
+    }, 350);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isLoading]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      if (!selectedFile.name.endsWith('.csv')) {
+      if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
         onError('Please select a CSV file');
         return;
       }
@@ -35,9 +51,11 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
 
     onStart();
     setIsLoading(true);
+    setUploadProgress(10);
 
     try {
       const result = await predictBatchFile(file);
+      setUploadProgress(100);
 
       onComplete({
         id: Date.now().toString(),
@@ -48,6 +66,9 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
       });
 
       setFile(null);
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
     } catch (err) {
       onError(`Upload failed: ${(err as Error).message}`);
     } finally {
@@ -63,6 +84,7 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
         <label className="block text-sm font-medium mb-2">CSV File</label>
         <div className="relative">
           <input
+            ref={inputRef}
             type="file"
             accept=".csv"
             onChange={handleFileChange}
@@ -116,7 +138,7 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
       {isLoading && uploadProgress > 0 && (
         <div className="space-y-1">
           <div className="flex justify-between text-xs">
-            <span>Uploading...</span>
+            <span>Uploading and analyzing...</span>
             <span>{uploadProgress}%</span>
           </div>
           <div className="w-full bg-slate-200 rounded-full h-2">
@@ -132,7 +154,7 @@ export default function CSVUpload({ onStart, onComplete, onError }: CSVUploadPro
       <button
         type="submit"
         disabled={!file || isLoading}
-        className="w-full bg-blue-600 text-white py-2 rounded-lg font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50"
+        className="w-full bg-gradient-to-r from-sky-600 to-teal-600 text-white py-2 rounded-lg font-medium flex items-center justify-center gap-2 hover:from-sky-700 hover:to-teal-700 transition-colors disabled:opacity-50"
       >
         <Upload className="w-4 h-4" />
         {isLoading ? 'Processing...' : 'Upload & Analyze'}

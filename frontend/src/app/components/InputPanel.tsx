@@ -33,7 +33,7 @@ export default function InputPanel({
   return (
     <div className="space-y-4">
       {/* Mode Selector */}
-      <div className="grid grid-cols-2 gap-2 p-2 rounded-xl bg-slate-100/70 border border-black/5">
+      <div className="grid grid-cols-3 gap-2 p-2 rounded-2xl bg-gradient-to-r from-sky-50/80 via-white to-amber-50/90 border border-sky-900/10">
         <button
           onClick={() => setMode('manual')}
           className={`relative overflow-hidden p-3 rounded-lg text-sm transition-colors duration-200 flex flex-col items-center gap-2 ${
@@ -76,7 +76,7 @@ export default function InputPanel({
         </button>
         <button
           onClick={() => setMode('trend')}
-          className={`relative overflow-hidden p-3 rounded-lg text-sm transition-colors duration-200 flex flex-col items-center gap-2 col-span-2 ${
+          className={`relative overflow-hidden p-3 rounded-lg text-sm transition-colors duration-200 flex flex-col items-center gap-2 ${
             mode === 'trend'
               ? 'text-teal-800 border border-teal-200'
               : 'bg-white border border-black/[0.08] hover:bg-slate-50'

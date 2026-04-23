@@ -53,7 +53,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-screen flex flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(15,118,110,0.18),_transparent_45%),radial-gradient(circle_at_bottom_right,_rgba(251,191,36,0.22),_transparent_40%),linear-gradient(180deg,_#f8fafc_0%,_#f1f5f9_100%)]">
+    <div className="relative h-screen flex flex-col overflow-hidden bg-[radial-gradient(circle_at_12%_8%,_rgba(14,165,233,0.22),_transparent_40%),radial-gradient(circle_at_86%_14%,_rgba(245,158,11,0.25),_transparent_42%),radial-gradient(circle_at_50%_100%,_rgba(20,184,166,0.18),_transparent_48%),linear-gradient(165deg,_#f8fafc_0%,_#eef2ff_48%,_#fefce8_100%)]">
       <motion.div
         aria-hidden
         initial={{ opacity: 0, scale: 0.9 }}
@@ -69,10 +69,10 @@ export default function App() {
         className="pointer-events-none absolute -right-20 bottom-10 h-72 w-72 rounded-full bg-amber-300/25 blur-3xl"
       />
       {/* Header */}
-      <header className="z-10 flex-shrink-0 border-b border-black/10 bg-white/70 backdrop-blur-xl">
+      <header className="z-10 flex-shrink-0 border-b border-slate-700/10 bg-white/80 backdrop-blur-xl">
         <div className="h-16 px-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl tracking-tight text-slate-900">Qval Insight</h1>
+            <h1 className="text-2xl tracking-tight text-slate-900">Qval Insight</h1>
             {apiReady ? (
               <motion.span
                 initial={{ opacity: 0, scale: 0.9 }}
@@ -110,7 +110,7 @@ export default function App() {
           initial={{ opacity: 0, x: -24 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.35, ease: 'easeOut' }}
-          className="w-80 rounded-2xl border border-black/10 bg-white/70 backdrop-blur-lg shadow-[0_10px_30px_rgba(2,6,23,0.08)] overflow-y-auto"
+          className="w-80 rounded-3xl border border-sky-900/10 bg-white/80 backdrop-blur-lg shadow-[0_14px_40px_rgba(2,6,23,0.10)] overflow-y-auto"
         >
           <div className="p-6">
             <h2 className="text-lg font-semibold mb-6">Analysis</h2>
@@ -128,7 +128,7 @@ export default function App() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: 'easeOut' }}
-          className="flex-1 overflow-y-auto rounded-2xl border border-black/10 bg-white/70 backdrop-blur-lg shadow-[0_10px_30px_rgba(2,6,23,0.08)]"
+          className="flex-1 overflow-y-auto rounded-3xl border border-sky-900/10 bg-white/75 backdrop-blur-lg shadow-[0_14px_40px_rgba(2,6,23,0.10)]"
         >
           <div className="max-w-4xl mx-auto px-6 py-12">
             {error && (
