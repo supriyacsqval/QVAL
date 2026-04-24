@@ -1,0 +1,9 @@
+Batch,ProductDescription,CharacteristicDesc,Quantative,StartDate,StartTime,EndDate,EndTime
+
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Potency,80,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),PH Level,10.5,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Impurities,3.2,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Dissolution Rate - 15 Mins,65,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Dissolution Rate - 30 Mins,60,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Dissolution Rate - 40 Mins,55,17-04-2026,10:00,17-04-2026,11:00
+BATCH-MET-FAIL-001,Metformin Tablets (850 MG),Process Temp,12,17-04-2026,10:00,17-04-2026,09:30

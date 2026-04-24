@@ -143,29 +143,34 @@ def _build_measure_text(capa_res: dict) -> str:
     out_of_bounds = bool(capa_res.get('measure_out_of_bounds', False))
 
     if not characteristic:
-        return 'No dominant rejected measure identified.'
+        return 'No specific parameter was found to be out of range.'
 
-    status = 'outside limits' if out_of_bounds else 'near limit'
-    return (
-        f'{characteristic}: value={value:.2f}, limits=[{min_val:.2f}, {max_val:.2f}], '
-        f'deviation={deviation:+.2f} ({status})'
-    )
+    if out_of_bounds:
+        return (
+            f"The batch was rejected because '{characteristic}' was {value:.2f}, which is outside the acceptable range [{min_val:.2f}, {max_val:.2f}]. "
+            f"Deviation from limit: {deviation:+.2f}."
+        )
+    else:
+        return (
+            f"Note: '{characteristic}' is close to the rejection limit (value: {value:.2f}, limits: [{min_val:.2f}, {max_val:.2f}]). "
+            f"Please monitor this parameter in future batches."
+        )
 
 
 def _build_analysis_text(shap_res: dict, hybrid_res: dict) -> str:
     if shap_res.get('shap_error'):
-        return f"Hybrid reason={hybrid_res['reason']}; SHAP unavailable ({shap_res['shap_error']})."
+        return "Root cause analysis is not available for this batch."
 
     top_feature = shap_res.get('shap_top_feature')
     top_contrib = shap_res.get('shap_top_contribution')
     top_value = shap_res.get('shap_top_feature_value')
     summary = shap_res.get('shap_summary') or ''
     if top_feature is None:
-        return f"Hybrid reason={hybrid_res['reason']}; no SHAP feature contribution available."
+        return "No specific feature was found to contribute significantly to this decision."
 
     return (
-        f"Hybrid reason={hybrid_res['reason']}; top SHAP feature {top_feature} "
-        f"(value={top_value:.2f}, contribution={top_contrib:+.4f}). Top factors: {summary}"
+        f"The most influential parameter was '{top_feature}' (value: {top_value:.2f}, impact: {top_contrib:+.4f}). "
+        f"Other important factors: {summary}"
     )
 
 
@@ -325,21 +330,36 @@ def _build_batch_prediction_result(row, meta_model=None, shap_explainer=None):
         'task_text': row.get('TaskText'),
     }
 
+    # Improved decision and measure explanations
+    batch_id = row.get('UniqueID') or row.get('Batch')
+    product = row.get('ProductName')
+    accept_status = hybrid_res['status'] == 'A'
+    # Check for near-limit warning if accepted
+    warning_text = ''
+    if accept_status and capa_res.get('capa_characteristic') and not capa_res.get('measure_out_of_bounds'):
+        warning_text = _build_measure_text(capa_res)
+
+    decision_text = (
+        f"Batch {batch_id} was ACCEPTED. All quality parameters are within the acceptable range."
+        if accept_status else
+        f"Batch {batch_id} was REJECTED because one or more parameters were outside the acceptable range."
+    )
+
+    measure_text = (
+        "No CAPA required. " + warning_text if accept_status else _build_measure_text(capa_res)
+    )
+
     return {
-        'batch': row.get('UniqueID') or row.get('Batch'),
-        'product': row.get('ProductName'),
+        'batch': batch_id,
+        'product': product,
         'start_time': row.get('StartTime'),
         'end_time': row.get('EndTime'),
         'latest': latest_res,
         'rf': rf_res,
         'hybrid': hybrid_res,
         'meta_reject_probability': round(float(meta_prob), 4) if meta_prob is not None else None,
-        'decision_text': (
-            f"Batch {row.get('UniqueID') or row.get('Batch')} predicted {hybrid_res['status']} "
-            f"(latest={latest_res['status']}:{float(latest_res['reject_confidence']):.3f}, "
-            f"rf={rf_res['status']}:{float(rf_res['reject_confidence']):.3f})."
-        ),
-        'measure_text': 'Not rejected; no CAPA measure required.' if hybrid_res['status'] != 'R' else _build_measure_text(capa_res),
+        'decision_text': decision_text,
+        'measure_text': measure_text,
         'analysis_text': _build_analysis_text(shap_res, hybrid_res),
         'root_causes': root_causes,
         'suggestions': suggestions,
